@@ -1,0 +1,11 @@
+{
+"a": {
+"VIC_infected_vs_uninfected_child":{
+        "restrict" : {"Age":"child"},
+	"adjust" : ["Sex"],
+        "splitType" : "Cell_Type",
+        "type" : "Cohort_State",
+        "case":"UK_72hpi_child_Infected",
+        "control":"uninfected_child_Uninfected"}
+ }
+}

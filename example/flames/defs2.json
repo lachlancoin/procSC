@@ -1,0 +1,16 @@
+{
+"infected":{
+   "restrict" : {"Cell_State":"Infected"},
+	"splitType" : "Variant",
+	"type" : "Cell_Type",
+	"all_vs_all" : true
+	},
+	"uninfected":{
+   "restrict" : {"Cell_State":"Uninfected"},
+	"splitType" : "Variant",
+	"type" : "Cell_Type",
+	"all_vs_all" : true
+	}
+}
+
+
