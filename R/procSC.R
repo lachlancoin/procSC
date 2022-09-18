@@ -1,21 +1,19 @@
 if(FALSE){
-#setwd( "/data/scratch/projects/punim1068/analysis_DTU/resdir/resdir1")
-setwd( "/data/scratch/projects/punim1068/analysis_genome/resdir8")
-setwd("/scratch/punim1068/flames_analysis")
 
+  setwd( "/data/scratch/projects/punim1068/analysis_genome/resdir8")
+  setwd("/scratch/punim1068/flames_analysis")
   #setwd("C:/Users/LCOIN/Downloads/scp")
 #setwd("/scratch/punim1068/Sepsis_single_cell")
-assign("last.warning", NULL, envir = baseenv())
-rm(list = ls())
+  assign("last.warning", NULL, envir = baseenv())
+  rm(list = ls())
 #load(".RData")
 }
   
 library(lmerTest)
 library(jsonlite)
 
-#if(is.null(params_file))
-  params_file="params.json"
-  args = commandArgs(trailingOnly=TRUE)
+params_file="params.json"
+args = commandArgs(trailingOnly=TRUE)
 if(length(args)>0) params_file = args[1]
 
 
@@ -30,25 +28,16 @@ if(length(args)>1) {
 params$outdir=outdir
 
 #try(source("/data/gpfs/projects/punim1466/sw/multigo/R/procSC_lib.R"))
-try(source("/home/lcoin/bitbucket/multigo/R/procSC_lib.R"))
+try(source("/home/lcoin/github/procSC/R/procSC_lib.R"))
 
 split = params$split[[1]]
 collapse=params$collapse[[1]]
-closeAllConnections()
-
-
-
-#if(params$normaliseByGene && params$geneColumn>0){
-#  input_file = getOption("input_file")
-#  sum_file = paste0("sums_",input_file )
-#  params$sum_file = sum_file
-#  .sumTranscripts( input_file = input_file,sum_file=sum_file )
-#}
-
 
 closeAllConnections()
+
 samples=read.csv(params$meta_file[[1]],sep="\t",header=T)
 
+##NOW INTEGRATE ANY CLINICAL DATA WITH SAMPLE TABLE
 if(!is.null(params$clinical_data)){
   clinical_data = read.table(params$clinical_data[[1]], sep="\t", header=T)
   nv = rep(0, ncol(clinical_data))
@@ -99,7 +88,7 @@ if(!is.null(getOption("mergeColumns"))){
   samples = cbind(samples, new_samples)
 }
 
-#table(samples$Sort)
+
 
 connection = gzfile( params$input_file[[1]],"rb")
 header=strsplit(readLines(connection,1),params$split[[1]])[[1]]
@@ -128,20 +117,10 @@ if(length(nonNA_mi)==0) stop(" cannot match")
 print(paste("total matching cell " ,length(nonNA_mi)))
 
 all = rep("all", length(mi))
+##samples 1 re ordered to match header
 samples1 = cbind(samples[mi,],all)
 
-
-if(!is.null(params$infectionColumn)){
-  sars=strsplit(readLines1(connection,1),split)[[1]]
-  if(length(grep(params$infectionColumn[[1]], sars))==0) stop(" not right")
-  print(sars[1])
-  InfectedCell = rep("Uninfected", length(sars))
-  InfectedCell[sars>0] = "Infected"
-  samples1 = cbind(samples1, InfectedCell)
-}
-
-
-
+##CHECKING THINGS MATCHED UP PROPERLY
 chk=cbind(header[nonNA_mi],as.character(samples1$NAME[nonNA_mi]))
 if(length(which(apply(chk,1,function(x)x[1]!=x[2])))>0){
   stop("error with matching")
@@ -149,12 +128,8 @@ if(length(which(apply(chk,1,function(x)x[1]!=x[2])))>0){
 
 
 for(j in 2:ncol(samples1)) samples1[,j] = factor(samples1[,j])
-if(TRUE){
-  ##THIS IS BECAUSE THE SAME SAMPLE GETS DIFFERENT INFECTIONS IN OUR DESIGN
-  samples1$Patient = apply(cbind(as.character(samples1$Patient), as.character(samples1$Cohort)),1,paste, collapse="_")
-}
-cohorts = unique(samples1$Cohort)
-def=list( splitType="all", type="Cohort",case=cohorts,control = c())
+
+def=list( splitType="all", type="Cohort",case= unique(samples1$Cohort),control = c())
 subindices_samples=.getSubIndices(def, samples1,min_cells_cases=0 , min_cells_controls=0)
                                  
 
@@ -165,21 +140,20 @@ for(i in 1:length(all_sum$sums_cases)){
   sums_all[indsi] = all_sum$sums_cases[i]
 }
 names(sums_all) = names(sums)
+
 meta=.getMeta(samples1)
 
 
 #defs_all2= rev(defs_all2)
-options(params)
+#options(params)
 if(is.null(names(params$defs))) names(params$defs)=1:length(params$defs)
+
 for(i in 1:length(params$defs)){
   print(i)
-  defs = .readDefs(params$defs[[i]])
-  #if(is.null(defs[[1]]$type)) stop(" maybe this uses old nested format")
-  ##min_sum is the minimum number of total reads 
-  for(j in 1:length(defs)){
-    #def_nme=names(params$defs)[[i]]
-    def_nme =names(defs)[[j]]
-   .runType(params, defs=defs[[j]], def_nme=def_nme, outdir=outdir)
+  defs_ = .readDefs(params$defs[[i]])
+  for(j in 1:length(defs_)){
+    def_nme =names(defs_)[[j]]
+   .runType(params, defs=defs_[[j]], def_nme=def_nme, outdir=outdir)
   }
 }
 

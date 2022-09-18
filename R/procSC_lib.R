@@ -105,19 +105,7 @@ inds_r
   }
 
    print(paste("col_nme", col_nme))
-  if(length(which(names(restrict) %in% c("case","control","all")))==0){
-    inds_r_case = .restrict(samples1,restrict, !is.na(samples1[,1]))
-    inds_r_control = inds_r_case
-  }else{
-  if(length(restrict)>0){
-    inds_r_case = !is.na(samples1[,1])
-    inds_r_control = !is.na(samples1[,1])
-    inds_r_case = .restrict(samples1,c(restrict$all, restrict$case), inds_r_case)
-       inds_r_control = .restrict(samples1, c(restrict$all, restrict$control), inds_r_control)
-  }
-  }
-  inds_r = inds_r_case | inds_r_control
-   cell_types = unique(samples1[[type]][which(inds_r)])
+   cell_types = unique(samples1[[type]])
   cohorts = grep("group",levels(samples1[[col_nme]]),  inv=T,v=T)
   if(is.null(control)){
     control = cohorts[!(cohorts %in% sepsis)]
@@ -128,8 +116,8 @@ inds_r
   adjust=unlist(def$adjust)
   
   subindices=lapply(cell_types,function(cell){
-    cases = which(samples1[[type]] %in% cell & samples1[[col_nme]] %in% sepsis & inds_r_case)
-    controls =  which(samples1[[type]] %in% cell & samples1[[col_nme]] %in% control & inds_r_control)
+    cases = which(samples1[[type]] %in% cell & samples1[[col_nme]] %in% sepsis )
+    controls =  which(samples1[[type]] %in% cell & samples1[[col_nme]] %in% control)
     case_ids = unique(patients[cases])
     control_ids = unique(patients[controls])
     df_cases = data.frame(matrix(NA,nrow=length(cases), ncol=4))
@@ -162,7 +150,11 @@ inds_r
     df = rbind(df_cases, df_controls)
    
     names(df) = c("condition","replicate","index","value")
-    if(!is.null(adjust)) df  = cbind(df,samples1[c(cases, controls), names(samples1) %in% adjust])
+    if(!is.null(adjust)) {
+      df_to_add = samples1[c(cases, controls), match( adjust, names(samples1)),drop=F]
+      names(df_to_add) =adjust 
+      df  = cbind(df,df_to_add)
+    }
     samps_cases=unlist(lapply(comb_inds_cases, length))
     samps_controls=unlist(lapply(comb_inds_controls, length))
     tsum_x = sum(samps_cases,na.rm=T) 
@@ -177,10 +169,15 @@ inds_r
     if(length(samps_cases)>0) df1_cases$value = samps_cases
     if(length(samps_controls)>0) df1_controls$value = samps_controls
     df1 = rbind(df1_cases, df1_controls)
-   if(!is.null(adj)) df1 = cbind(df1, )
+  
     df[,1] = factor(df[,1]); df[,2] = factor(df[,2]) ;
     df1[,1] = factor(df1[,1]); df1[,2] = factor(df1[,2]) ;
-  
+    
+    if(!is.null(adjust)){
+      df1_to_add = meta[match(df1$replicate, meta$Patient), match( adjust, names(meta)),drop=F]
+     names(df1_to_add) = adjust
+     df1 = cbind(df1, df1_to_add)
+    }
       pv=.wilcoxon(x = samps_cases,y=  samps_controls,
                    paste("cell_count",cell,sep="_"),tsum_x, tsum_y)
       pvi = as.numeric(pv[pv_index])
@@ -228,7 +225,7 @@ lmtestAnalysis<-function(df1,gene="", tsum_x=10, tsum_y=10,  lmer=T){
   baseMean = (sx+sy)/(lx+ly)
   pvalue=NA
   beta=NA
-  if(lx>2 && ly>2){
+  if(lx>=2 && ly>=2){
     if(lmer){
       o = try(lmerTest::lmer(value ~ condition + (1 | replicate), data=df1))
     }else{
@@ -258,7 +255,7 @@ lmtestAnalysis<-function(df1,gene="", tsum_x=10, tsum_y=10,  lmer=T){
   baseMean = (sx+sy)/(lx+ly)
  # if(is.infinite(mx)) stop(paste("inf mx", sx, lx))
  # if(is.infinite(my)) stop(paste("inf y", sy, ly))
-  if(lx>2 && ly>2){
+  if(lx>=2 && ly>=2){
    pvalue= try(wilcox.test(x[nonNAx],y[nonNAy])$p.value)
    if(inherits(pvalue,"try-error")) pvalue=NA
    } else pvalue= NA
@@ -407,18 +404,21 @@ if(length(infy)>0){
 
 
 .getMeta<-function(samples1){
-samples_t = table(samples1$Patient)                                       
-samples_p1 = samples1[!duplicated(samples1$Patient),,drop=F]
-mi1 = match(samples_p1$Patient, names(samples_t))
-cell_counts = samples_t[mi1]
-samples_p2 = cbind(samples_p1, cell_counts)
-samples_p2
+  samples_t = table(samples1$Patient)                                       
+  samples_p1 = samples1[!duplicated(samples1$Patient),,drop=F]
+  mi1 = match(samples_p1$Patient, names(samples_t))
+  cell_counts = samples_t[mi1]
+  samples_p2 = cbind(samples_p1, cell_counts)
+  toremove = names(samples_p2) %in% c("NAME","Cell_Type", "Cell_State")
+  print(toremove)
+  samples_p2 = samples_p2[,!toremove,drop=F]
+  samples_p2
 }
 ##OUTPUT FOR TYPE
 .runType<-function(params, defs, def_nme, outdir=getOption("outdir")){
   min_sum=getOption("min_total_sum",100)
   geneColumn=getOption("geneColumn"); input_file=getOption("input_file"); 
- sum_file=getOption("sum_file",paste0("sum_", input_file))
+ #sum_file=getOption("sum_file",paste0("sum_", input_file))
  normalise= getOption("normalise");split=getOption("split"); collapse=getOption("collapse"); lmTest = getOption("lmTest")
   closeAllConnections()
   h_out1 = c("GeneName","baseMean", "mean_x","mean_y","log2FoldChange", "length_x","length_y","tsum_x","tsum_y", "tsum",  "pvalue")
@@ -441,8 +441,6 @@ samples_p2
   cell_types = cell_types[!is.na(cell_types)]
   outf_cell = file(paste0(outdir_nme,"/cell_sig.txt"), open="w") 
   writeLines(paste(header_out,"nme",sep=collapse), outf_cell)
-  
-  
   
   subindices_type = lapply(defs, .getSubIndices, samples1, header_out, outdir=outdir_nme, outf_cell = outf_cell,
                            collapse=collapse, meta=meta, cell_types=cell_types)
