@@ -1,21 +1,20 @@
 if(FALSE){
 
-  setwd( "/data/scratch/projects/punim1068/analysis_genome/resdir8")
-  setwd("/scratch/punim1068/flames_analysis")
+  #setwd( "/data/scratch/projects/punim1068/analysis_genome/resdir8")
+  #setwd("/scratch/punim1068/flames_analysis")
   #setwd("C:/Users/LCOIN/Downloads/scp")
 #setwd("/scratch/punim1068/Sepsis_single_cell")
-  setwd("C:/Users/LCOIN/data/flames_multigo")
+ # setwd("C:/Users/LCOIN/data/flames_multigo")
   assign("last.warning", NULL, envir = baseenv())
   rm(list = ls())
   closeAllConnections()
-  
-#load(".RData")
+  setwd("~/github/procSC/example/flames")
 }
   
 library(lmerTest)
 library(jsonlite)
 
-params_file="params.json"
+params_file="params_spartan.json"
 args = commandArgs(trailingOnly=TRUE)
 if(length(args)>0) params_file = args[1]
 
@@ -30,14 +29,19 @@ if(length(args)>1) {
 }
 params$outdir=outdir
 working_dir = getOption("working_dir","./")
-setwd(working_dir)
+defs_=.readDefs(params$defs)
+
+
+
 #try(source("/data/gpfs/projects/punim1466/sw/multigo/R/procSC_lib.R"))
-try(source(paste(getOption("procSC_home","/home/lcoin/github/procSC"),"R/procSC_lib.R",sep="/")))
+try(source(paste(getOption("procSC_home","~/procSC"),"R/procSC_lib.R",sep="/")))
 
 split = params$split[[1]]
 collapse=params$collapse[[1]]
 
 
+
+setwd(working_dir)
 samples=read.csv(params$meta_file[[1]],sep="\t",header=T)
 ##NOW INTEGRATE ANY CLINICAL DATA WITH SAMPLE TABLE
 samples=.addClinicalData(samples, params$clinical_data)
@@ -54,7 +58,6 @@ samples=.addMergeColumns(samples, getOption("mergeColumns"), params$cohortSplit[
 #subindices_samples=.getSubIndices(def_all, samples,min_cells_cases=0 , min_cells_controls=0)
 #c(list(all=def_all),
 
-defs_=.readDefs(params$defs)
 
 #samp2 = lapply(defs_, .splitFrameMultiple,samples1)
 ##NOW READ SC data
@@ -89,10 +92,10 @@ while(TRUE){
   matr=.readMatrix(connection,nextLine)
   nextLine = attr(matr,"next")
    
-  pv_res_all =  lapply(samples1,function(pSB){
+  pv_res_all =  lapply(samples1,function(psB){
      params_ = attr(psB,"params")
-      lapply(pSB, function(psb1){
-      .assocTestAll(psb1, matr, ll0)
+      lapply(psB, function(psb1){
+      .assocTestAll(psb1, matr)
       })
   })
   for(j in 1:length(outf)){

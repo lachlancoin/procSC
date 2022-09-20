@@ -969,6 +969,7 @@ error=function(cond) {
 .assocTestAll<-function(psb1, matr,
                         min_num_reads = getOption("min_num_reads",20)
 ){
+  def = psb1$def
   df_all = psb1$df_all
   df_summ=psb1$df_summ
   gene=attr(matr,"gene")
@@ -983,8 +984,8 @@ error=function(cond) {
   inds_t = which(tsums>min_num_reads)
   matr1 = matr1[,inds_t,drop=F]
   matr2 = matr2[,inds_t,drop=F]
-  pv_res=.sigInner(df_all, matr1,params_, psb1$ll0,"cell")
-  pv_res2=.sigInner(df_summ, matr2,params_,psb1$ll0_sum,"pb")
+  pv_res=.sigInner(df_all, matr1,psb1$formula, psb1$ll0,"cell")
+  pv_res2=.sigInner(df_summ, matr2,psb1$formula,psb1$ll0_sum,"pb")
   Name = factor(rep(attr(psb1$def,"nme"), nrow(pv_res)))
   Condition = paste(paste(def$case, collapse="_"), "vs",paste(def$control, collapse="_"),sep="_")
   Cell_type = factor(rep(psb1$cell_type, nrow(pv_res)))
@@ -993,14 +994,14 @@ error=function(cond) {
   result
 }
 
-.sigInner<-function(data,matr, params_, ll0, type=""){
+.sigInner<-function(data,matr, params_, ll0, type="",gene=attr(matr,"gene")){
   ##SIGNIFICANCE AT CELL LEVEL
   formula1=params_$formula1; formula2=params_$formula2
   gm1 = glm(formula1, data=data,family="binomial")
   ll1 = logLik(gm1)
   pv_res = matrix(.chisq(ll0,gm1),nrow=1)  
   dimnames(pv_res) =list(gene,paste(c("pv","beta"),type,sep="_" ))#,"count","non-zero") 
-  if(nrow(matr)==0) return(pv_res)
+  if(ncol(matr)==0) return(data.frame(pv_res))
   pv_res1 = t(apply(matr,2,function(v){
     data$xT = v
     gm2 = glm(formula2, data=data,family="binomial")
