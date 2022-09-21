@@ -1,112 +1,130 @@
 if(FALSE){
-
-  #setwd( "/data/scratch/projects/punim1068/analysis_genome/resdir8")
-  #setwd("/scratch/punim1068/flames_analysis")
-  #setwd("C:/Users/LCOIN/Downloads/scp")
-#setwd("/scratch/punim1068/Sepsis_single_cell")
- # setwd("C:/Users/LCOIN/data/flames_multigo")
   assign("last.warning", NULL, envir = baseenv())
   rm(list = ls())
   closeAllConnections()
-  setwd("~/github/procSC/example/flames")
+  setwd("~/github/procSC/example/flames_jessie")
 }
-  
+{  
 library(lmerTest)
 library(jsonlite)
 
-params_file="params_spartan.json"
+params_file="params.json"
 args = commandArgs(trailingOnly=TRUE)
 if(length(args)>0) params_file = args[1]
 
 
 print(params_file)
 params = read_json(params_file); options(params)  
-outdir = params$outdir
+if(!is.null(getOption("include"))){
+  params1 = read_json(getOption("include")); options(params1); options(params);
+}
+try(source(paste(getOption("procSC_home","~/procSC"),"R/procSC_lib.R",sep="/")))
+
+
+outdir = getOption("outdir","results")
 if(length(args)>1) {
  outdir = args[2]
 }else{
- outdir=paste0(params$outdir,format(Sys.time(), "%a_%b_%d_%H_%M_%S_%Y"))
+ outdir=paste0(outdir,format(Sys.time(), "%a_%b_%d_%H_%M_%S_%Y"))
 }
-params$outdir=outdir
+options("outdir"=outdir)
 working_dir = getOption("working_dir","./")
-defs_=.readDefs(params$defs)
 
 
 
 #try(source("/data/gpfs/projects/punim1466/sw/multigo/R/procSC_lib.R"))
-try(source(paste(getOption("procSC_home","~/procSC"),"R/procSC_lib.R",sep="/")))
+defs_=.readDefs(getOption("defs","defs.json"))
 
-split = params$split[[1]]
-collapse=params$collapse[[1]]
-
-
+whitelist = NULL
+if(!is.null(getOption("transcript_whitelist"))){
+  whitelist = read.csv(getOption("transcript_whitelist"),head=F)[,1]
+}
 
 setwd(working_dir)
-samples=read.csv(params$meta_file[[1]],sep="\t",header=T)
+samples=read.csv(getOption("meta_file","samples.txt")[[1]],sep="\t",header=T)
 ##NOW INTEGRATE ANY CLINICAL DATA WITH SAMPLE TABLE
-samples=.addClinicalData(samples, params$clinical_data)
+#clinical_data = getOption("clinical_data",NULL)
+#if(!is.null(clinical_data)){
+#  samples=.addClinicalData(samples, read.table(clinical_data[[1]], sep="\t", header=T))
+#}
 ##FOLLOWING IF WE DONT HAVE TOTAL READS COUNTS AS COLUMN IN meta_file
 if(nchar(getOption("sumsInMeta",""))==0 || is.null(samples[getOption("sumsInMeta")])){
   samples=.addCountData(samples)
 }
-samples=.addSplitColumns(samples, params$cohortSplitName,params$cohortSplit)
-samples=.addMergeColumns(samples, getOption("mergeColumns"), params$cohortSplit[[1]])
+samples=.addSplitColumns(samples, getOption("cohortSplitName"),getOption("cohortSplit"))
+samples=.addMergeColumns(samples, getOption("mergeColumns"),getOption("cohortSplit"))
 
+samples=.addSumColumns(samples, "pseudobulk")
+samples = .addSumColumns(samples, "library")
 
+print(head(samples))
 
-#def_all=list( splitBy="all", case=list(Cohort="all"), control = list(Cohort="none"))
-#subindices_samples=.getSubIndices(def_all, samples,min_cells_cases=0 , min_cells_controls=0)
-#c(list(all=def_all),
+connection = gzfile( getOption("input_file"),"rb")
+header=strsplit(readLines(connection,1),getOption("split",",")[[1]])[[1]]
 
-
-#samp2 = lapply(defs_, .splitFrameMultiple,samples1)
-##NOW READ SC data
-
-connection = gzfile( params$input_file[[1]],"rb")
-header=strsplit(readLines(connection,1),params$split[[1]])[[1]]
 samples1 = lapply(defs_, function(def){
+  mi = match( names(def$case),names(samples))
+  names(mi)=names(def$case)
+  if(length(which(is.na(mi)))>0) stop("paste problem with defs ")
   samp1 = .getDataFrame(def, samples, header)
+  if(nrow(samp1)==0) stop(" somthing wrong with definition, no barcodes selected")
   tab = table(samp1$casecontrol)
-  print(min(tab))
+  print(tab)
   samp2 = .splitFrameMultiple(def, samp1)
-  
-  psB=lapply(samp2,.pseudoBulk, params$pseudobulk,def,  sumTags = params$sumsInMeta)
+  psB=lapply(samp2,.pseudoBulk, def)
+           
   print(lapply(psB, function(x)table(x$df_all$casecontrol)))
   #attr(psB, "def")=def
   psB
 })
 
-#psb1=samples1$VIC_infected_vs_uninfected_child$Uninfected
+#psb1=samples1$VIC_infected_vs_uninfected_child$all
 dir.create(outdir)
 
 outf=vector("list", length(samples1))
-
+header =  c("ID","Name","Condition","Cell_type","pv_cell","beta_cell","pv_pb","beta_pb")
 for(j in 1:length(samples1)){
   outf[[j]] = gzfile(paste(outdir, "/",names(samples1)[[j]],".tsv.gz",sep=""),open="w")
+  writeLines(paste(header,collapse="\t" ), outf[[j]])
 }
 
-nextLine=strsplit(readLines(connection,1),params$split[[1]])[[1]]
+nextLine=strsplit(readLines(connection,1),getOption("split")[[1]])[[1]]
 
+cnt=0
+max_count=getOption("max_cnt",1e9)
+min_num_reads = getOption("min_num_reads")
 
-while(TRUE){
+transcript_column = getOption("transcriptColumn",NULL)
+while(cnt<max_count){
+  print(paste(cnt, nextLine[[1]]))
+  
   matr=.readMatrix(connection,nextLine)
   nextLine = attr(matr,"next")
+  
+  to_include =rep(T, length(matr))
+  if(!is.null(transcript_column) && !is.null(whitelist)){
+    transcript_ids = unlist(lapply(names(matr), function(m1){
+      strsplit(m1,"\\|")[[1]][transcript_column]
+    }))
+    to_include = (!is.na(match(transcript_ids, whitelist)))
+  }
    
   pv_res_all =  lapply(samples1,function(psB){
      params_ = attr(psB,"params")
       lapply(psB, function(psb1){
-      .assocTestAll(psb1, matr)
+      .assocTestAll(psb1, matr, to_include=to_include, min_num_reads = min_num_reads)
       })
   })
   for(j in 1:length(outf)){
     lapply(pv_res_all[[j]], function(pv_res){
-      write.table(pv_res,outf[[j]],row.names=F,quote=F, sep="\t")
+         write.table(pv_res,outf[[j]],row.names=F,quote=F, sep="\t", append=T, col.names=F)
     })
   }
- 
+ cnt=cnt+1
 }
                           
 closeAllConnections()
+}
 #.runType("Cell_State" )
 
 

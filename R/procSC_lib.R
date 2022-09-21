@@ -752,6 +752,12 @@ error=function(cond) {
     samples[[names(defcase)[[j]]]] %in% defcase[[j]]
   } ))
   ,1,max)
+  if(length(which(case_inds==1))==0){
+    print(unique(samples[names(defcase)[[1]]]))
+    print(paste(' did not find any cases:',defcase[1]))
+    
+  }
+  case_inds
 }
 
 .getDataFrame<-function(def,samples, header=NULL){
@@ -789,8 +795,8 @@ error=function(cond) {
   outd
 }
 
-.splitFrameMultiple<-function(def, samples){
-  dfs = list(samples)
+.splitFrameMultiple<-function(def, samp1){
+  dfs = list(samp1)
   for(j in 1:length(def$splitBy)){
     dfs =  unlist(lapply(dfs, function(df1){
       splitBy=def$splitBy[[j]]
@@ -802,21 +808,43 @@ error=function(cond) {
 }
 
 
-.getFormulaFromDef<-function(def){
-  str0=if(length(def$adjust_fixed)==0) "casecontrol~1" else paste0("casecontrol~",paste(unlist(c(def$adjust_fixed)),collapse="+"))
-  str1=paste0("casecontrol~",paste(unlist(c("xG",def$adjust_fixed)),collapse="+"))
-  str2=paste0("casecontrol~",paste(unlist(c("xT+xG",def$adjust_fixed)),collapse="+"))
+.getFormulaFromDef<-function(def, nmes){
+  adjust_fixed1 = unlist(def$adjust_fixed)
+  adjust_random1 = unlist(def$adjust_random)
+  lapply(nmes,function(nme){
+  adjust_fixed = adjust_fixed1[which(adjust_fixed1 %in% nme)]
+  adjust_random = adjust_random1[which(adjust_random1 %in% nme)]
+  str0=if(length(adjust_fixed)==0) "casecontrol~1" else paste0("casecontrol~",paste(adjust_fixed,collapse="+"))
+  str1=paste0("casecontrol~",paste(c("xG",adjust_fixed),collapse="+"))
+  str2=paste0("casecontrol~",paste(c("xT+xG",adjust_fixed),collapse="+"))
+  lmTest=F
+  if(length(adjust_random)>0){
+    lmTest=T
+    rand_effect=paste(unlist(lapply(adjust_random, function(x) paste0("(1|",x,")"))),collapse="+")
+    str0 = paste(str0,rand_effect, sep="+")
+    str1 = paste(str1,rand_effect, sep="+")
+    str2 = paste(str2,rand_effect, sep="+")
+  }
   list(
     formula0=as.formula(str0),
     formula1=as.formula(str1),
-    formula2 = as.formula(str2))
+    formula2 = as.formula(str2),
+    lmTest =lmTest 
+    )
+  })
 }
-.pseudoBulk<-function(samples3,psb, def,
-                      sumTags=c("Count"),
-                      num_cols = c(sumTags,"index","index_header","xG","xT","casecontrol")){
+.pseudoBulk<-function(samples3,def       ){
+  psb=getOption("pseudobulk","Patient")
+                            
+  sumTags=getOption("sumsInMeta","Count")
+  extra_tags = c("ReadCount","CellCount","AvgRead")
+  num_cols = c("index","index_header","xG","xT","casecontrol")
+  num_cols = c(num_cols, paste(extra_tags, "pseudobulk",sep="_"), paste(extra_tags, "library",sep="_"))
+  num_cols = c(num_cols, getOption("sumsInMeta"))
+  num_cols  = c(num_cols, "index_within")
+  
   index_within=1:nrow(samples3)
   cell_type=attr(samples3,"nme")
-  num_cols  = c(num_cols, "index_within")
   samples3 = cbind(samples3,index_within)
   s3 = factor( samples3[[psb]])
   levs = levels(s3)
@@ -830,9 +858,11 @@ error=function(cond) {
   }))
   dimnames(datf)[[1]] = names(s4[[1]])
   inds_to_keep=(apply(datf, 1, max)==1)
+  inds_to_keep[which(names(inds_to_keep) %in% c("casecontrol"))]=TRUE
+  inds_to_keep[which(names(inds_to_keep) %in% sumTags)]=TRUE
+  
   sumInds =which( names(inds_to_keep) %in% sumTags)
   inds_to_keep[sumInds]=T
-  inds_to_keep[which(names(inds_to_keep) %in% c("casecontrol"))]=TRUE
   s4_summ=
     .merge1(
       lapply(s4,function(s41){
@@ -845,11 +875,20 @@ error=function(cond) {
   })
   inds2 = which(!(names(samples3) %in% num_cols))
   for(j in inds2) samples3[,j] = factor(samples3[,j])
-  params_ = .getFormulaFromDef(def)
-  gm0 = glm(params_$formula0, data=samples3,family="binomial")
-  ll0 = logLik(gm0)
+  params_ = .getFormulaFromDef(def,list(df_all=names(samples3),df_summ=names(s4_summ)))
+ 
+  if(params_[[1]]$lmTest){
+    gm0 = try(lmerTest::lmer(params_$df_all$formula0, data=samples3)) 
+    gm0_1 = try(lmerTest::lmer(params_$df_summ$formula0, data=s4_summ)) 
+    
+  }else{
+   gm0 = glm(params_$df_all$formula0, data=samples3,family="binomial")
+   
+   gm0_1 = glm(params_$df_summ$formula0, data=s4_summ,family="binomial")
 
-  gm0_1 = glm(params_$formula0, data=s4_summ,family="binomial")
+  }
+  ll0 = logLik(gm0)
+  
   ll0_1 = logLik(gm0_1)  
   
   list(df_summ=s4_summ, sep=s4_sep, df_all=samples3,def=def,formula=params_,ll0=ll0,ll0_sum=ll0_1,
@@ -892,7 +931,7 @@ error=function(cond) {
 
 .addClinicalData<-function(samples, clinical_data){
   if(!is.null(clinical_data)){
-    clinical_data = read.table(clinical_data[[1]], sep="\t", header=T)
+   
     nv = rep(0, ncol(clinical_data))
     for(j in 1:ncol(clinical_data)){
       nv[j] =length(unique(clinical_data[,j]))
@@ -920,7 +959,7 @@ error=function(cond) {
 
 .addCountData<-function(samples){
   ##following makes a new meta file with the counts
-  outf1 = paste0(params$meta_file,".1.txt")
+  outf1 = paste0(getOption("meta_file"),".1.txt")
   if(!file.exists(outf1)){
     sums = .getSums()
     names(sums) = header
@@ -953,10 +992,10 @@ error=function(cond) {
     if(is.null(gene)) gene = gene1
     if(gene1!=gene) break;
     #  transcript = strsplit(currLine,"\\|")[[1]][transcriptColumn]
-    which(currLine1!="0")
+    #which(currLine1!="0")
     res[[length(res)+1]] = currLine1
     currLine=readLines(connection,1)
-    currLine1=if(is.null(currLine)) NULL else strsplit(currLine,params$split[[1]])[[1]]
+    currLine1=if(is.null(currLine)) NULL else strsplit(currLine,getOption("split")[[1]])[[1]]
   }
   names(res) = lapply(res, function(r)r[[1]])
   attr(res,"next")=currLine1
@@ -966,13 +1005,13 @@ error=function(cond) {
 
 
 
-.assocTestAll<-function(psb1, matr,
+.assocTestAll<-function(psb1, matr,to_include =rep(T, length(matr)),
                         min_num_reads = getOption("min_num_reads",20)
 ){
+  gene = attr(matr,"gene")
   def = psb1$def
   df_all = psb1$df_all
   df_summ=psb1$df_summ
-  gene=attr(matr,"gene")
   matr1 = data.frame(lapply(matr, function (line) as.numeric(line[psb1$df_all$index_header])))
   matr2 =  t(data.frame(lapply(psb1$sep, function(sep1){
     apply(matr1[sep1$index_within,,drop=F],2,sum)
@@ -981,11 +1020,11 @@ error=function(cond) {
   df_all$xG = apply(matr1,1,sum)
   df_summ$xG = apply(matr2,1,sum)
   tsums=apply(matr2,2,sum) ## can use matr2 or matr1
-  inds_t = which(tsums>min_num_reads)
+  inds_t = which(to_include & tsums>min_num_reads)
   matr1 = matr1[,inds_t,drop=F]
   matr2 = matr2[,inds_t,drop=F]
-  pv_res=.sigInner(df_all, matr1,psb1$formula, psb1$ll0,"cell")
-  pv_res2=.sigInner(df_summ, matr2,psb1$formula,psb1$ll0_sum,"pb")
+  pv_res=.sigInner(df_all, matr1,psb1$formula$df_all, psb1$ll0,"cell",gene=gene)
+  pv_res2=.sigInner(df_summ, matr2,psb1$formula$df_summ,psb1$ll0_sum,"pb",gene=gene)
   Name = factor(rep(attr(psb1$def,"nme"), nrow(pv_res)))
   Condition = paste(paste(def$case, collapse="_"), "vs",paste(def$control, collapse="_"),sep="_")
   Cell_type = factor(rep(psb1$cell_type, nrow(pv_res)))
@@ -993,18 +1032,29 @@ error=function(cond) {
   result=cbind(ID, Name,Condition,Cell_type, pv_res, pv_res2)
   result
 }
+#      
 
 .sigInner<-function(data,matr, params_, ll0, type="",gene=attr(matr,"gene")){
   ##SIGNIFICANCE AT CELL LEVEL
   formula1=params_$formula1; formula2=params_$formula2
+  lmTest = params_$lmTest
+  if(lmTest){
+    gm1 = try(lmerTest::lmer(formula1, data=data)) 
+  }else{
   gm1 = glm(formula1, data=data,family="binomial")
+  }
   ll1 = logLik(gm1)
+  
   pv_res = matrix(.chisq(ll0,gm1),nrow=1)  
   dimnames(pv_res) =list(gene,paste(c("pv","beta"),type,sep="_" ))#,"count","non-zero") 
   if(ncol(matr)==0) return(data.frame(pv_res))
   pv_res1 = t(apply(matr,2,function(v){
     data$xT = v
-    gm2 = glm(formula2, data=data,family="binomial")
+    if(lmTest){
+      gm2 = try(lmerTest::lmer(formula2, data=data)) 
+    }else{
+      gm2 = glm(formula2, data=data,family="binomial")
+    }
     .chisq(ll1,gm2)
   }))
   pv_res2 = data.frame(rbind(pv_res,pv_res1))
@@ -1022,3 +1072,25 @@ error=function(cond) {
   res
 }
 
+
+.addSumColumns<-function(samples, type="pseudobulk",count_tag = getOption("sumsInMeta","Count")){
+  pseudobulk = getOption(type,NULL)
+  if(is.null(pseudobulk)) return(samples)
+  if(!(pseudobulk %in% names(samples))) return(samples)
+  levs=unique(samples[[pseudobulk]])
+  # PBcount = rep(0, nrows(samples))
+  names(levs) = levs
+  results=data.frame(t(data.frame( lapply(levs, function(lev){
+    ind_lev = samples[[pseudobulk]]==lev
+    PB_read_count_i=sum(samples[[count_tag]][ind_lev])
+    PB_cell_count_i=length(which(ind_lev))
+    PB_avg_read_i=PB_read_count_i/PB_cell_count_i
+    c(PB_read_count_i, PB_cell_count_i, PB_avg_read_i)
+  }))))
+  dimnames(results)[[1]] = levs
+  names(results) = paste(c("ReadCount","CellCount","AvgRead"), type,sep="_")
+  mi = match(samples[[pseudobulk]],levs)
+  s1 = cbind(samples, results[mi,,drop=F])
+  dimnames(s1)[[1]] = dimnames(samples)[[1]]
+  s1
+}
