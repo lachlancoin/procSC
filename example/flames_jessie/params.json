@@ -1,0 +1,8 @@
+{
+"working_dir" : "/data/scratch/projects/punim1068/flames_analysis/",
+"procSC_home" : "~/github/procSC",
+"transcriptColumn" : 1,
+"library" : "Cohort" ,
+"include" : "params_jessie.json",
+"transcript_whitelist" : "/data/scratch/projects/punim1068/flames_analysis_jessie/sqanti_whitelist/total_whitelist.tsv" 
+}

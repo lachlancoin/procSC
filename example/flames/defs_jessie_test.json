@@ -1,7 +1,10 @@
 {
 "VIC_infected_vs_uninfected_child":{
-        "splitBy" : ["Cell_State"],
-        "adjust_fixed" : ["Sex","Age"],
+        "splitBy" : ["all"],
+        
+        "adjust_fixed" : ["Sex","Count"],
+        "comment" : ["ReadCount_pseudobulk",  "CellCount_pseudobulk","AvgRead_pseudobulk",
+                        "ReadCount_library",         "CellCount_library"        , "AvgRead_library"  ],
         "adjust_random" : ["Patient"],
         "case":{"Cell_Type":"Secretory-Ciliated-1"},
         "control":{"Cell_Type":"Secretory-Ciliated-3"}
