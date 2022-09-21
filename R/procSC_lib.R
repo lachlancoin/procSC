@@ -585,7 +585,11 @@ error=function(cond) {
  # })
   
 #  defs_all2
-      defs2
+      lapply(defs2, function(d1){
+        if(is.null(d1$adjust_fixed)) d1$adjust_fixed = getOption("adjust_fixed",c())
+        if(is.null(d1$adjust_random)) d1$adjust_random = getOption("adjust_random",c())
+        d1
+      })
 }
 
 #explode(defs[[1]], levels(samples1[[defs[[1]]$type]]))
@@ -817,23 +821,28 @@ error=function(cond) {
   str0=if(length(adjust_fixed)==0) "casecontrol~1" else paste0("casecontrol~",paste(adjust_fixed,collapse="+"))
   str1=paste0("casecontrol~",paste(c("xG",adjust_fixed),collapse="+"))
   str2=paste0("casecontrol~",paste(c("xT+xG",adjust_fixed),collapse="+"))
-  lmTest=F
-  if(length(adjust_random)>0){
-    lmTest=T
+  lmTest=length(adjust_random)>0
+  l1 = list(
+    formula0=as.formula(str0),
+    formula1=as.formula(str1),
+    formula2 = as.formula(str2)
+  )
     rand_effect=paste(unlist(lapply(adjust_random, function(x) paste0("(1|",x,")"))),collapse="+")
     str0 = paste(str0,rand_effect, sep="+")
     str1 = paste(str1,rand_effect, sep="+")
     str2 = paste(str2,rand_effect, sep="+")
-  }
-  list(
+  l2 = list(
     formula0=as.formula(str0),
     formula1=as.formula(str1),
-    formula2 = as.formula(str2),
-    lmTest =lmTest 
+    formula2 = as.formula(str2)
     )
+  list("fixed"=l1, "rand"=l2, lmTest=lmTest)
   })
 }
-.pseudoBulk<-function(samples3,def       ){
+.pseudoBulk<-function(samples3,def      ){
+  min_cells = getOption("min_cells",10)  ##min for each of cases and controls
+  t = table(samples3$casecontrol)
+  if(length(t)==1 || min(t)<min_cells) return(NULL)
   psb=getOption("pseudobulk","Patient")
                             
   sumTags=getOption("sumsInMeta","Count")
@@ -875,24 +884,24 @@ error=function(cond) {
   })
   inds2 = which(!(names(samples3) %in% num_cols))
   for(j in inds2) samples3[,j] = factor(samples3[,j])
-  params_ = .getFormulaFromDef(def,list(df_all=names(samples3),df_summ=names(s4_summ)))
- 
+  params_ = .getFormulaFromDef(def,
+                               nmes = list(df_all=names(samples3),df_summ=names(s4_summ)))
+  gm0 = glm(params_$df_all$fixed$formula0, data=samples3,family="binomial")
+  gm0_1 = glm(params_$df_summ$fixed$formula0, data=s4_summ,family="binomial")
+  ll0 = list(fixed=logLik(gm0), rand=NULL)
+  ll0_sum = list(fixed = logLik(gm0_1), rand=NULL)
   if(params_[[1]]$lmTest){
-    gm0 = try(lmerTest::lmer(params_$df_all$formula0, data=samples3)) 
-    gm0_1 = try(lmerTest::lmer(params_$df_summ$formula0, data=s4_summ)) 
-    
-  }else{
-   gm0 = glm(params_$df_all$formula0, data=samples3,family="binomial")
-   
-   gm0_1 = glm(params_$df_summ$formula0, data=s4_summ,family="binomial")
-
+    gm0_rand = try(lmerTest::lmer(params_$df_all$rand$formula0, data=samples3)) 
+    if(!inherits(gm0_rand,"try-error"))  ll0$rand = logLik(gm0_rand)
+    gm0_1_rand = try(lmerTest::lmer(params_$df_summ$rand$formula0, data=s4_summ)) 
+    if(!inherits(gm0_1_rand,"try-error"))  ll0_sum$rand = logLik(gm0_1_rand)
   }
-  ll0 = logLik(gm0)
-  
-  ll0_1 = logLik(gm0_1)  
-  
-  list(df_summ=s4_summ, sep=s4_sep, df_all=samples3,def=def,formula=params_,ll0=ll0,ll0_sum=ll0_1,
-       cell_type=cell_type)
+  result=list(df_summ=s4_summ, sep=s4_sep, df_all=samples3,def=def,formula=params_,
+              ll0 = ll0,
+              ll0_sum = ll0_sum,
+              cell_type=cell_type)
+  result
+ 
 }
 
 
@@ -1006,7 +1015,7 @@ error=function(cond) {
 
 
 .assocTestAll<-function(psb1, matr,to_include =rep(T, length(matr)),
-                        min_num_reads = getOption("min_num_reads",20)
+                        base_mean_thresh = getOption("base_mean_thresh",0)
 ){
   gene = attr(matr,"gene")
   def = psb1$def
@@ -1017,58 +1026,83 @@ error=function(cond) {
     apply(matr1[sep1$index_within,,drop=F],2,sum)
   })))
   
-  df_all$xG = apply(matr1,1,sum)
-  df_summ$xG = apply(matr2,1,sum)
-  tsums=apply(matr2,2,sum) ## can use matr2 or matr1
-  inds_t = which(to_include & tsums>min_num_reads)
+  
+  baseMean=apply(matr2,2,mean) ## can use matr2 or matr1
+  
+  geneMean = sum(baseMean)
+  inds_t =to_include & baseMean>base_mean_thresh
+  
   matr1 = matr1[,inds_t,drop=F]
   matr2 = matr2[,inds_t,drop=F]
-  pv_res=.sigInner(df_all, matr1,psb1$formula$df_all, psb1$ll0,"cell",gene=gene)
-  pv_res2=.sigInner(df_summ, matr2,psb1$formula$df_summ,psb1$ll0_sum,"pb",gene=gene)
+
+  pv_res=.sigInner(df_all, matr1,forms=psb1$formula$df_all, ll=psb1$ll0,type="cell",gene=gene)
+  pv_res2=.sigInner(df_summ, matr2,forms=psb1$formula$df_summ,ll=psb1$ll0_sum,type="pb",gene=gene)
   Name = factor(rep(attr(psb1$def,"nme"), nrow(pv_res)))
   Condition = paste(paste(def$case, collapse="_"), "vs",paste(def$control, collapse="_"),sep="_")
   Cell_type = factor(rep(psb1$cell_type, nrow(pv_res)))
   ID = factor(dimnames(pv_res)[[1]])
-  result=cbind(ID, Name,Condition,Cell_type, pv_res, pv_res2)
+  
+  baseMean = c(geneMean,baseMean[inds_t])
+  result=cbind(ID, Name,Condition,Cell_type, pv_res, pv_res2, baseMean)
   result
 }
 #      
 
-.sigInner<-function(data,matr, params_, ll0, type="",gene=attr(matr,"gene")){
-  ##SIGNIFICANCE AT CELL LEVEL
-  formula1=params_$formula1; formula2=params_$formula2
-  lmTest = params_$lmTest
-  if(lmTest){
-    gm1 = try(lmerTest::lmer(formula1, data=data)) 
-  }else{
-  gm1 = glm(formula1, data=data,family="binomial")
-  }
-  ll1 = logLik(gm1)
+.sigInner<-function(data,mat, forms=NULL, ll=NULL, type="",gene=attr(matr,"gene")){
+  lmTest = forms$lmTest
+  data$xG = apply(mat,1,sum)
+  #gm0 = glm(forms$fixed$formula0, data=data,family="binomial")
   
-  pv_res = matrix(.chisq(ll0,gm1),nrow=1)  
-  dimnames(pv_res) =list(gene,paste(c("pv","beta"),type,sep="_" ))#,"count","non-zero") 
-  if(ncol(matr)==0) return(data.frame(pv_res))
-  pv_res1 = t(apply(matr,2,function(v){
-    data$xT = v
-    if(lmTest){
-      gm2 = try(lmerTest::lmer(formula2, data=data)) 
-    }else{
-      gm2 = glm(formula2, data=data,family="binomial")
+  gm1 = glm(forms$fixed$formula1, data=data,family="binomial")
+  ll1 =logLik(gm1)
+  pv_res_0 = .chisq(ll$fixed,gm1, cols=c(1,4))  #1 and 4 for fixed
+  pv_res_1 = c(NA,NA)
+  ll1_rand = NULL
+  if(lmTest && !is.null(ll$rand)){
+   # gm01 = try(lmerTest::lmer(forms$rand$formula0, data=data)) 
+    
+    gm11 = try(lmerTest::lmer(forms$rand$formula1, data=data)) 
+    if(!inherits(gm11,"try-error")) {
+      ll1_rand = logLik(gm11)
+     pv_res_1 = .chisq(ll$rand,gm11,cols=c(1,5)) 
     }
-    .chisq(ll1,gm2)
+  }
+  pv_res = matrix(c(pv_res_0, pv_res_1),nrow=1)
+  pv_res_name=c(paste(c("beta","pv"),type,"fixed",sep="_" ),paste(c("beta","pv"),type,"rand",sep="_" ))
+  dimnames(pv_res) =list(gene,pv_res_name)#,"count","non-zero") 
+  
+  if(ncol(mat)==0) return(data.frame(pv_res))
+  pv_res1 = t(apply(mat,2,function(v){
+    data$xT = v
+    gm2 = glm(forms$fixed$formula2, data=data,family="binomial")
+    pv0 = .chisq(ll1,gm2,cols=c(1,4))
+    pv_1 = c(NA,NA)
+    if(lmTest && !is.null(ll1_rand)){
+      gm2_0 = try(lmerTest::lmer(forms$rand$formula2, data=data)) 
+      if(!inherits(gm2_0,"try-error")) {
+        pv_1 = .chisq(ll1_rand,gm2_0,cols=c(1,5))
+      }
+    }
+    c(pv0, pv_1)
+     
+    
   }))
   pv_res2 = data.frame(rbind(pv_res,pv_res1))
   pv_res2
 }
 
 
-.chisq<-function(ll1,gm2){
+.chisq<-function(ll1,gm2, chisq=F,cols=c(1,4)){
   s1 = summary(gm2)
+  if(!chisq){
+   # print(s1$coefficients)
+    return(s1$coefficients[2,cols])
+  }
   ll2 =logLik(gm2)
   df = abs(attr(ll1,"df")[1]-attr(ll2,"df")[1])
   lldif= abs(2*(ll1 - ll2))
   pv = pchisq(lldif,df,lower.tail=FALSE,log.p=F)
-  res = c(pv, s1$coefficients[2,1])
+  res = c(s1$coefficients[2,1],pv)
   res
 }
 

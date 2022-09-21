@@ -24,6 +24,7 @@
 "pseudobulk" : "Patient_Cohort",
 "split": "\t",
 "collapse" : "\t",
+"base_mean_thresh" : 0,
 "min_cells" : 10,
 "min_num_reads" : 50,
 "min_total_sum" : 200

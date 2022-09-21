@@ -1,29 +1,22 @@
 {
-"a": {
 "UK_infected_vs_uninfected_child":{
-        "restrict" : {"Age":"child"},
-        "splitType" : "Cell_Type",
-        "type" : "Cohort_State",
-        "case":"UK_72hpi_child_Infected",
-        "control":"uninfected_child_Uninfected"},
+        "splitBy" : "Cell_Type",
+        "case":{"Cohort_State":"UK_72hpi_child_Infected"},
+        "control":{"Cohort_State":"uninfected_child_Uninfected"}
+        },
 "VIC_infected_vs_uninfected_child":{
-        "restrict" : {"Age":"child"},
-        "splitType" : "Cell_Type",
-        "type" : "Cohort_State",
-        "case":"VIC01_72hpi_child_Infected",
-        "control":"uninfected_child_Uninfected"},
+        "splitBy" : "Cell_Type",
+        "case":{"Cohort_State":"VIC01_72hpi_child_Infected"},
+        "control":{"Cohort_State":"uninfected_child_Uninfected"}
+},
 "adult_vs_child_uninfected":{
-        "splitType" : "Cell_Type",
-        "type" : "Cohort_State",
-        "case":"uninfected_child_Uninfected",
-        "exclude" : false,
-        "control":"uninfected_adult_Uninfected"},
+        "splitBy" : "Cell_Type",
+        "case":{"Cohort_State":"uninfected_child_Uninfected"},
+        "control":{"Cohort_State":"uninfected_adult_Uninfected"}
+        },
 "wuhan_vs_alpha_infected_child":{
-        "splitType" : "Cell_Type",
-        "type" : "Cohort_State",
-        "case":"UK_72hpi_child_Infected",
-        "exclude" : false,
-        "control":"VIC01_72hpi_child_Infected"
+        "splitBy" : "Cell_Type",
+        "case":{"Cohort_State":"UK_72hpi_child_Infected"},
+        "control":{"Cohort_State":"VIC01_72hpi_child_Infected"}
    }
- }
 }
