@@ -705,14 +705,35 @@ error=function(cond) {
 #NEW FUNCTS
 
 
-.merge1<-function(t1,num_cols = c(),uniq_cols=c(), addName=NULL){
+.merge1<-function(t_,num_cols = c(),uniq_cols=c(), addName=NULL, all_num=F,
+                  attribute = NULL, addRow=NULL){
   
-  t = t1[unlist(lapply(t1, function(x)!is.null(x)))]
+  attribs=NULL
+  
+  t = t_[unlist(lapply(t_, function(x)!is.null(x)))]
   if(length(t)==0) return(NULL)
+  if(!is.null(attribute)){
+    attribs = unlist(lapply(t, function(x) attr(x,attribute[[1]])))
+  }
+  
   t1 = t[[1]]
+  if(all_num) num_cols = dimnames(t[[1]])[[2]]
+  #print(num_cols)
+  nme_col=-1
+  attrib_col=-1
+  row_col=-1
   if(!is.null(addName)){
     nme = rep(names(t)[[1]], nrow(t1))
     t1 = cbind(t1, nme)
+    nme_col = ncol(t1)
+  }
+  if(!is.null(attribs)){
+    t1 = cbind(t1,attribs[1])
+    attrib_col = ncol(t1)
+  }
+  if(!is.null(addRow)){
+    t1 = cbind(t1, dimnames(t1)[[1]])
+    row_col = ncol(t1)
   }
   if(length(t)>1){
     for(i in 2:length(t)){
@@ -721,15 +742,27 @@ error=function(cond) {
         nme = rep(names(t)[[i]], nrow(t_i))
         t_i = cbind(t_i, nme)
       }
+      if(!is.null(attribs)){
+        t_i = cbind(t_i,attribs[[i]])
+      }
+      if(!is.null(addRow)){
+        t_i = cbind(t_i, dimnames(t_i)[[1]])
+      }
+      names(t_i) = names(t1)
       t1 = rbind(t1,t_i)
     }
   }
   dimnames(t1)[[1]]=1:nrow(t1)
   t2 = data.frame(t1)
-  if(!is.null(addName)){
-    names(t2)[ncol(t2)]=addName
+  if(nme_col>0){
+    names(t2)[nme_col]=addName
   }
-  
+  if(attrib_col>0){
+    names(t2)[attrib_col]=names(attribute)[1]
+  }
+  if(row_col>0){
+    names(t2)[row_col] = addRow
+  }
   if(length(uniq_cols)>0){
     facts = factor(apply(t2[,which(names(t2) %in% uniq_cols),drop=F],1,paste, collapse="."))
     t2 = t2[!duplicated(facts),,drop=F]
@@ -811,16 +844,43 @@ error=function(cond) {
   dfs
 }
 
+# #DR ~ casecontrol+Sex
+.getDirFormulaFromDef<-function(def, nmes, 
+                             includeFixed=T){
+  adjust_fixed1 = if(includeFixed) unlist(def$adjust_fixed) else c()
+  
+  adjust_random1 =c() # unlist(def$adjust_random)
+  lapply(nmes,function(nme){
+    adjust_fixed = adjust_fixed1[which(adjust_fixed1 %in% nme)]
+    adjust_random = adjust_random1[which(adjust_random1 %in% nme)]
+    str0=if(length(adjust_fixed)==0) "DR~1" else paste0("DR~",paste(adjust_fixed,collapse="+"))
+    str1=paste0("DR~",paste(c("casecontrol",adjust_fixed),collapse="+"))
+    #str2=paste0("casecontrol~",paste(c(if(includeFixed)"xT+xG" else "xT",adjust_fixed),collapse="+"))
+    l1 = list(
+      formula0=as.formula(str0),
+      formula1 = as.formula(str1)
+    )
+   l2 = list(formula0=str0, formula1=str1)
+    list("fixed"=l1,"string"=l2)
+  })
+}
 
-.getFormulaFromDef<-function(def, nmes){
-  adjust_fixed1 = unlist(def$adjust_fixed)
+.getFormulaFromDef<-function(def, nmes, addReplicate=rep(F,length(nmes)),
+                             includeFixed=getOption("includeFixedEffectsInFormula",F)){
+  adjust_fixed1 = if(includeFixed) unlist(def$adjust_fixed) else c()
+  
   adjust_random1 = unlist(def$adjust_random)
+ for(j in 1:length(nmes)) attr(nmes[[j]], "addReplicate")=addReplicate[[j]]
+  
   lapply(nmes,function(nme){
   adjust_fixed = adjust_fixed1[which(adjust_fixed1 %in% nme)]
   adjust_random = adjust_random1[which(adjust_random1 %in% nme)]
+  if(attr(nme,"addReplicate")){
+    adjust_random = paste(adjust_random1,"replicate",sep=".")
+  }
   str0=if(length(adjust_fixed)==0) "casecontrol~1" else paste0("casecontrol~",paste(adjust_fixed,collapse="+"))
   str1=paste0("casecontrol~",paste(c("xG",adjust_fixed),collapse="+"))
-  str2=paste0("casecontrol~",paste(c("xT+xG",adjust_fixed),collapse="+"))
+  str2=paste0("casecontrol~",paste(c(if(includeFixed)"xT+xG" else "xT",adjust_fixed),collapse="+"))
   lmTest=length(adjust_random)>0
   l1 = list(
     formula0=as.formula(str0),
@@ -840,11 +900,7 @@ error=function(cond) {
   })
 }
 .pseudoBulk<-function(samples3,def      ){
-  min_cells = getOption("min_cells",10)  ##min for each of cases and controls
-  t = table(samples3$casecontrol)
-  if(length(t)==1 || min(t)<min_cells) return(NULL)
   psb=getOption("pseudobulk","Patient")
-                            
   sumTags=getOption("sumsInMeta","Count")
   extra_tags = c("ReadCount","CellCount","AvgRead")
   num_cols = c("index","index_header","xG","xT","casecontrol")
@@ -872,12 +928,13 @@ error=function(cond) {
   
   sumInds =which( names(inds_to_keep) %in% sumTags)
   inds_to_keep[sumInds]=T
-  s4_summ=
-    .merge1(
-      lapply(s4,function(s41){
-        s41[1,sumInds] = apply(s41[,sumInds,drop=F],2,sum)
-        s41[1,inds_to_keep]
-      }), num_cols = num_cols)
+  t1 = lapply(s4,function(s41){
+    s41[1,sumInds] = apply(s41[,sumInds,drop=F],2,sum)
+    s41[1,inds_to_keep]
+  })
+  s4_summ=  .merge1( t1, num_cols = num_cols, uniq_cols=c(), addName=F)
+   
+  
   dimnames(s4_summ)[[1]] = names(s4)
   s4_sep = lapply(s4,function(s41){
     s41[,!inds_to_keep,drop=F]
@@ -885,7 +942,10 @@ error=function(cond) {
   inds2 = which(!(names(samples3) %in% num_cols))
   for(j in inds2) samples3[,j] = factor(samples3[,j])
   params_ = .getFormulaFromDef(def,
-                               nmes = list(df_all=names(samples3),df_summ=names(s4_summ)))
+                               nmes = list(df_all=names(samples3),df_summ=names(s4_summ)),
+                               addReplicate = c(F,T))
+  params_dir = .getDirFormulaFromDef(def,
+                                  nmes = list(df_all=names(samples3),df_summ=names(s4_summ)))
   gm0 = glm(params_$df_all$fixed$formula0, data=samples3,family="binomial")
   gm0_1 = glm(params_$df_summ$fixed$formula0, data=s4_summ,family="binomial")
   ll0 = list(fixed=logLik(gm0), rand=NULL)
@@ -899,6 +959,7 @@ error=function(cond) {
   result=list(df_summ=s4_summ, sep=s4_sep, df_all=samples3,def=def,formula=params_,
               ll0 = ll0,
               ll0_sum = ll0_sum,
+              formula_dir = params_dir,
               cell_type=cell_type)
   result
  
@@ -1014,95 +1075,155 @@ error=function(cond) {
 
 
 
-.assocTestAll<-function(psb1, matr,to_include =rep(T, length(matr)),
-                        base_mean_thresh = getOption("base_mean_thresh",0)
-){
-  gene = attr(matr,"gene")
-  def = psb1$def
-  df_all = psb1$df_all
-  df_summ=psb1$df_summ
-  matr1 = data.frame(lapply(matr, function (line) as.numeric(line[psb1$df_all$index_header])))
-  matr2 =  t(data.frame(lapply(psb1$sep, function(sep1){
-    apply(matr1[sep1$index_within,,drop=F],2,sum)
-  })))
-  
-  
-  baseMean=apply(matr2,2,mean) ## can use matr2 or matr1
-  
-  geneMean = sum(baseMean)
-  inds_t =to_include & baseMean>base_mean_thresh
-  
-  matr1 = matr1[,inds_t,drop=F]
-  matr2 = matr2[,inds_t,drop=F]
 
-  pv_res=.sigInner(df_all, matr1,forms=psb1$formula$df_all, ll=psb1$ll0,type="cell",gene=gene)
-  pv_res2=.sigInner(df_summ, matr2,forms=psb1$formula$df_summ,ll=psb1$ll0_sum,type="pb",gene=gene)
-  Name = factor(rep(attr(psb1$def,"nme"), nrow(pv_res)))
-  Condition = paste(paste(def$case, collapse="_"), "vs",paste(def$control, collapse="_"),sep="_")
-  Cell_type = factor(rep(psb1$cell_type, nrow(pv_res)))
-  ID = factor(dimnames(pv_res)[[1]])
+#      
+.wilc<-function(xG, casecontrol){
+  caseinds = which(casecontrol==0 & !is.na(xG))
+  controlinds = which(casecontrol==1 & !is.na(xG))
+  if(length(caseinds)<2 || length(controlinds)<2) return (NA)
+  pv_w = try(wilcox.test(xG[caseinds],xG[controlinds])$p.value)
+  if(inherits(pv_w,"try-error"))  return(NA)
+  pv_w
+}
+
+.centralise <-
+  function(vec,na.replace = NA){
+    vec1 = (vec-mean(vec,na.rm=TRUE))
+    vec1[is.na(vec1)] = na.replace
+    vec1
+  }
+.dirichlet<-function(dfs, mat, formula0, formula1,  type="cell"){
+  #print(form1)
+  tot= apply(mat,1,sum)
+  nmes = paste(c("dir_pv","dir_beta"),type,sep="_")
+  inds1 = which(tot>0)
+  if(length(inds1)==0) return (NA)
+  #dfs1 = dfs[inds1,,drop=F]
+  if(length(table(dfs1$casecontrol))<=1) {
+    print(" only cases or only controls")
+    return (array(NA, dim=c(ncol(mat) +1 , 2), dimnames = list(NULL, nmes)))
+  }
+  tryCatch(
+    {
+     
+      dfs$DR <- DR_data(mat)
+      mod0 <- DirichReg(as.formula(formula0), dfs)
+      mod1<-DirichReg(as.formula(formula1), dfs)
+      summ =summary(mod1)
+      m1=summ$coef.mat
+      m1 = m1[which(dimnames(m1)[[1]]=="casecontrol"),]
+      dimnames(m1)[[1]] = summ$varnames
+      pv_res1=anova(mod0, mod1, sorted = TRUE)$Pr[2]
+      result = rbind(c(pv_res1,NA), m1[,c(4,1)])
+      dimnames(result)[[2]] = nmes
+      return(result)
+    },
+    error=function(cond) {
+      print("error")
+      message(cond)
+      return (array(NA, dim=c(ncol(mat) +1 , 2), dimnames = list(NULL, nmes)))
+      
+    },
+    finally={
+     
+    })
+}
+.assocTestAll<-function(psb1, matr1,matr2,adj = 1, var_thresh = 0.001){
+  def = psb1$def
+
+  ##NEED TO DECIDE WHAT TO DO WITH THESE
+ 
+  if(ncol(matr2)>length(adj)){
+    formula0 = psb1$formula_dir$df_summ$string$formula0
+    formula1 = psb1$formula_dir$df_summ$string$formula1
+    
+    pv_dir_summ=  .dirichlet(psb1$df_summ, matr2[,-adj,drop=F], formula0,formula1, type="pb")
+    formula0 = psb1$formula_dir$df_all$string$formula0
+    formula1 = psb1$formula_dir$df_all$string$formula1
+    pv_dir_all=  .dirichlet(psb1$df_all, matr1[,-adj,drop=F], formula0, formula1, type="cell")
+  }else{
+    
+    pv_dir_summ = array(NA, dim=c(ncol(matr2)-length(adj) +1 , 2), dimnames = list(dimnames(matr2)[[2]], c("dir_pv_pb","dir_beta_pb")))
+    pv_dir_all =array(NA, dim=c(ncol(matr2)-length(adj) +1 , 2), dimnames = list(dimnames(matr1)[[2]], c("dir_pv_cell","dir_beta_cell")))
+  }
   
-  baseMean = c(geneMean,baseMean[inds_t])
-  result=cbind(ID, Name,Condition,Cell_type, pv_res, pv_res2, baseMean)
+  pv_res=.sigInner(psb1$df_all, matr1,forms=psb1$formula$df_all, ll=psb1$ll0,type="cell", adj = adj, var_thresh = var_thresh)
+  pv_res2=.sigInner(psb1$df_summ, matr2,forms=psb1$formula$df_summ,ll=psb1$ll0_sum,type="pb", adj=adj, var_thresh = var_thresh)
+  if(is.null((pv_res))) return(NULL)
+  
+  result=cbind(pv_res, pv_res2, pv_dir_all, pv_dir_summ)
   result
 }
-#      
 
-.sigInner<-function(data,mat, forms=NULL, ll=NULL, type="",gene=attr(matr,"gene")){
+.sigInner<-function(data,mat, forms=NULL, ll=NULL, adj=1, type="", var_thresh = 0.01){
+  if(ncol(mat)==0){
+    return (NULL)
+  }
+  ##GENE LEVEL ASSOCIATION
   lmTest = forms$lmTest
-  data$xG = apply(mat,1,sum)
-  #gm0 = glm(forms$fixed$formula0, data=data,family="binomial")
-  
+  mat2 = apply(mat,2,.centralise)
+  if(length(adj)>1){
+    UDV = projOut_A(mat2, inds = (!is.na(mat2[,1])) ,colinds = adj[-length(adj)], centralise=F) 
+    data$xG= UDV$P2 %*% mat2[,adj[length(adj)]]
+  }else{
+    data$xG = mat2[,1]
+  }
+  pv_wilcox = .wilc(data$xG, data$casecontrol)
   gm1 = glm(forms$fixed$formula1, data=data,family="binomial")
   ll1 =logLik(gm1)
   pv_res_0 = .chisq(ll$fixed,gm1, cols=c(1,4))  #1 and 4 for fixed
   pv_res_1 = c(NA,NA)
   ll1_rand = NULL
   if(lmTest && !is.null(ll$rand)){
-   # gm01 = try(lmerTest::lmer(forms$rand$formula0, data=data)) 
-    
     gm11 = try(lmerTest::lmer(forms$rand$formula1, data=data)) 
     if(!inherits(gm11,"try-error")) {
       ll1_rand = logLik(gm11)
-     pv_res_1 = .chisq(ll$rand,gm11,cols=c(1,5)) 
+      pv_res_1 = .chisq(ll$rand,gm11,cols=c(1,5)) 
     }
   }
-  pv_res = matrix(c(pv_res_0, pv_res_1),nrow=1)
-  pv_res_name=c(paste(c("beta","pv"),type,"fixed",sep="_" ),paste(c("beta","pv"),type,"rand",sep="_" ))
-  dimnames(pv_res) =list(gene,pv_res_name)#,"count","non-zero") 
+  pv_res = matrix(c(pv_res_0, pv_res_1, pv_wilcox),nrow=1)
+  pv_res_name=c(paste(c("beta","pv"),type,"fixed",sep="_" ),paste(c("beta","pv"),type,"rand",sep="_" ),paste("wilcox_pv",type,sep="_"))
+  dimnames(pv_res)[[2]] =pv_res_name#,"count","non-zero") 
   
-  if(ncol(mat)==0) return(data.frame(pv_res))
-  pv_res1 = t(apply(mat,2,function(v){
-    data$xT = v
+  
+  ##NOW TRANSCRIPTS
+  UDV = projOut_A(mat2, inds = (!is.na(mat2[,1])) ,colinds = adj, centralise=F) 
+#  mat3 = UDV$P2 %*%mat2 #[,-adj,drop=F]
+  if(ncol(mat)<=1) return(data.frame(pv_res))
+  
+  mat3 = mat2[,-adj,drop=F]
+  pv_res1 = t(apply(mat3,2,function(v){
+    data$xT = UDV$P2 %*%v
+    if(var(data$xT)<var_thresh) return(c(NA,NA,NA,NA, NA))
     gm2 = glm(forms$fixed$formula2, data=data,family="binomial")
     pv0 = .chisq(ll1,gm2,cols=c(1,4))
+    pv_wilcox_t= .wilc(data$xT, data$casecontrol) ## could also do on not corrected
+#      try(wilcox.test(data$xT[data$casecontrol==0] /data$xG[data$casecontrol==0],
+ #                              data$xT[data$casecontrol==1] /data$xG[data$casecontrol==1])$p.value)
     pv_1 = c(NA,NA)
-    if(lmTest && !is.null(ll1_rand)){
+    if(lmTest){
       gm2_0 = try(lmerTest::lmer(forms$rand$formula2, data=data)) 
       if(!inherits(gm2_0,"try-error")) {
         pv_1 = .chisq(ll1_rand,gm2_0,cols=c(1,5))
       }
     }
-    c(pv0, pv_1)
+    c(pv0, pv_1, pv_wilcox_t)
      
     
   }))
   pv_res2 = data.frame(rbind(pv_res,pv_res1))
+  dimnames(pv_res2)[[1]][1] = dimnames(mat)[[2]][adj[length(adj)]]
   pv_res2
 }
 
 
-.chisq<-function(ll1,gm2, chisq=F,cols=c(1,4)){
+.chisq<-function(ll1,gm2, cols=c(1,4)){
   s1 = summary(gm2)
-  if(!chisq){
-   # print(s1$coefficients)
-    return(s1$coefficients[2,cols])
-  }
-  ll2 =logLik(gm2)
-  df = abs(attr(ll1,"df")[1]-attr(ll2,"df")[1])
-  lldif= abs(2*(ll1 - ll2))
-  pv = pchisq(lldif,df,lower.tail=FALSE,log.p=F)
-  res = c(s1$coefficients[2,1],pv)
+  #ll2 =logLik(gm2)
+ # df = abs(attr(ll1,"df")[1]-attr(ll2,"df")[1])
+#  lldif= abs(2*(ll1 - ll2))
+#  pv = pchisq(lldif,df,lower.tail=FALSE,log.p=F)
+  res = c(s1$coefficients[2,cols])
   res
 }
 

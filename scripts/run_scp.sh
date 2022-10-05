@@ -23,15 +23,15 @@ module load   r-bundle-bioconductor/3.10-r-3.6.2
 #$rcmd procSC.R
 #tail procSC.Rout
 dat=$(date +%Y%m%d%H%M%S)
-outdir=out_${dat}
 
-Rscript  /home/lcoin/bitbucket/multigo/R/procSC.R $1 $outdir
+
+Rscript  ~/github/procSC/R/procSC.R $1 
 
 #now prepare the zip output files
-cd $outdir
-find . -mindepth 2 -type d > todo.txt
-while read line; do a=$(basename $line) ; find $line -type f | xargs -I {} zip -R $a.zip {} ; done < todo.txt
+#cd $outdir
+#find . -mindepth 2 -type d > todo.txt
+#while read line; do a=$(basename $line) ; find $line -type f | xargs -I {} zip -R $a.zip {} ; done < todo.txt
 
-find . -maxdepth 1 -mindepth 1 -type d > todo.txt
-while read line; do a=$(basename $line) ; find $line -type f | xargs -I {} zip -R $a.zip {} ; done < todo.txt
+#find . -maxdepth 1 -mindepth 1 -type d > todo.txt
+#while read line; do a=$(basename $line) ; find $line -type f | xargs -I {} zip -R $a.zip {} ; done < todo.txt
 

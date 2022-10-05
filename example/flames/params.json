@@ -1,7 +1,14 @@
 {
+"working_dir" : "/data/scratch/projects/punim1068/flames_analysis/",
+"procSC_home" : "~/github/procSC",
+
+"transcriptColumn" : 1,
+"library" : "Cohort" ,
+"transcript_whitelist" : "/data/scratch/projects/punim1068/flames_analysis_jessie/sqanti_whitelist/total_whitelist.tsv" ,
+  
 "type_to_do": ["Cell_Type","Variant","Age"],
 "outdir": "out_comb",
-"defs" :  "defs_jessie_test.json",
+"defs" :  "defs_jessie.json",
 "normalise" : true,
 "sumsInMeta" : "Count",
 "normaliseByGene" : true,
@@ -12,8 +19,6 @@
 "lmTest" : "lmTest",
 "prefix": "chrom_out",
 "geneSplit" : ",",
-"working_dir" : ".",
-"procSC_home" : "C:/Users/LCOIN/github/procSC",
 "input_file": "scp_out_tex.txt.gz",
 "meta_file" : "scp_meta_new.txt",
 "addInfectionColumn": null,
@@ -24,8 +29,18 @@
 "pseudobulk" : "Patient_Cohort",
 "split": "\t",
 "collapse" : "\t",
-"base_mean_thresh" : 0,
+"gene_base_mean_thresh" : 50, "comment" : "pseudobulk mean gene expression threshold",
+"transcript_base_mean_thresh" : 1, "comment" : "pseudobulk mean transcript expression threshold",
 "min_cells" : 10,
-"min_num_reads" : 50,
-"min_total_sum" : 200
+"min_reads_per_cell" : 1000,
+"min_num_reads" : 10,
+"min_total_sum" : 200,
+"includeFixedEffectsInFormula": false,
+"min_num_transcripts" : 1,
+"adjust_fixed" : ["Sex"],
+"target_genes_not_used" : ["ENSG00000006327"],
+        "adjust_random" : ["Patient"],
+ "comment" : ["ReadCount_pseudobulk",  "CellCount_pseudobulk","AvgRead_pseudobulk",
+                        "ReadCount_library",         "CellCount_library"        , "AvgRead_library"  ]
+
 }
